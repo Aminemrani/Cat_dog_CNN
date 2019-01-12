@@ -1,0 +1,247 @@
+import numpy as np
+from keras import layers
+from keras.layers import Input, Add, Dense, Activation, ZeroPadding2D, BatchNormalization, Flatten, Conv2D
+from keras.layers import AveragePooling2D, MaxPooling2D, Dropout, GlobalMaxPooling2D, GlobalAveragePooling2D
+from keras.models import Model
+from keras.preprocessing import image
+from keras.utils import layer_utils
+from keras.utils.data_utils import get_file
+from keras.applications.imagenet_utils import preprocess_input
+import pydot
+from IPython.display import SVG
+from keras.utils.vis_utils import model_to_dot
+from keras.utils import plot_model
+# from kt_utils import *
+from sklearn.model_selection import train_test_split
+
+import keras.backend as K
+K.set_image_data_format('channels_last')
+
+
+root="C:/Users/amine/Desktop/catdog/train/"
+X=[]
+y=[]
+
+shape=(64,64,3)
+def gather_date(root):
+    #makeing data set
+
+    import glob
+    import numpy as np
+    import cv2
+    import random
+
+
+    X=[]
+    y=[]
+    i=0
+    images=glob.glob(root+ "*.jpg")
+    for image in images:
+        name=image.split("/")[-1]
+        img=cv2.imread(image)
+        img=cv2.resize(img, shape[:-1])
+#         cv2.imshow("image", img)
+#         cv2.waitKey(0)
+        X.append(img)
+        if "cat" in name:
+            y.append(0)
+        if "dog"in name:
+            y.append(1)
+        
+# ##Data Augmentattion 5 times        
+        img2=cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        rand=random.uniform(0.3,1)
+        img2[:,:,2]=rand*img2[:,:,2]
+        img2=cv2.cvtColor(img2, cv2.COLOR_HSV2BGR)
+        
+        X.append(img2)
+        if "cat" in name:
+            y.append(0)
+        if "dog"in name:
+            y.append(1)
+        
+        
+        img3=cv2.flip(img, 0)
+        img4=cv2.flip(img, 1)
+        X.append(img3)
+        X.append(img4)
+        if "cat" in name:
+            y.append(0)
+            y.append(0)
+        if "dog"in name:
+            y.append(1)
+            y.append(1)
+        
+        
+        ker=np.ones((5,5), np.float32)/25
+        img5=cv2.filter2D(img, -1, ker)
+                
+        X.append(img5)
+        if "cat" in name:
+            y.append(0)
+        if "dog"in name:
+            y.append(1)
+
+        img6=cv2.blur(img, (5,5))
+                
+        X.append(img6)
+        if "cat" in name:
+            y.append(0)
+        if "dog"in name:
+            y.append(1)            
+#         cv2.imshow("image", img6)
+#         cv2.waitKey(0)
+        
+        
+  
+    X=np.array(X)
+    y=np.array(y)
+    
+        # Normalize image vectors
+    X = X/255.
+
+    print("data is ready")
+    X_train, X_test, Y_train, Y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+
+    # Reshape
+    Y_train = Y_train.T
+    Y_test = Y_test.T
+    print(X_train.shape)
+    
+    return(X_train, X_test, Y_train, Y_test)
+
+
+def identity_block(X, f, filters, stage, block):
+
+    
+    # defining name basis
+    conv_name_base = 'res' + str(stage) + block + '_branch'
+    bn_name_base = 'bn' + str(stage) + block + '_branch'
+    
+    # Retrieve Filters
+    F1, F2, F3 = filters
+ 
+    X_shortcut = X 
+
+    X = Conv2D(filters = F1, kernel_size = (1, 1), strides = (1,1), padding = 'valid', name = conv_name_base + '2a')(X)
+    X = BatchNormalization(axis = 3, name = bn_name_base + '2a')(X)
+    X = Activation('relu')(X)
+
+    X = Conv2D(filters = F2, kernel_size = (f, f), strides = (1,1), padding = 'same', name = conv_name_base + '2b')(X)
+    X = BatchNormalization(axis = 3, name = bn_name_base + '2b')(X)
+    X = Activation('relu')(X)
+
+    X = Conv2D(filters = F3, kernel_size = (1, 1), strides = (1,1), padding = 'valid', name = conv_name_base + '2c')(X)
+    X = BatchNormalization(axis = 3, name = bn_name_base + '2c')(X)
+
+    X = Add()([X, X_shortcut])
+    X = Activation('relu')(X)
+ 
+    return X
+
+
+
+def CATDOG(input_shape):
+
+
+    # Define the input placeholder as a tensor with shape input_shape. Think of this as your input image!
+    X_input = Input(input_shape)
+
+    # Zero-Padding: pads the border of X_input with zeroes
+    X = ZeroPadding2D((2, 2))(X_input)
+    # CONV -> BN -> RELU Block applied to X
+    X = Conv2D(16, (5, 5), strides = (1, 1), name = 'conv0')(X)
+    X = BatchNormalization(axis = 3, name = 'bn0')(X)
+    X = Activation('relu')(X)
+    ##64*64*16
+
+    X = ZeroPadding2D((2, 2))(X_input)
+    # CONV -> BN -> RELU Block applied to X
+    X = Conv2D(16, (5, 5), strides = (1, 1), name = 'conv1')(X)
+    X = BatchNormalization(axis = 3, name = 'bn1')(X)
+    X = Activation('relu')(X)
+    # MAXPOOL
+    X = MaxPooling2D((2, 2), name='max_pool1')(X)
+    
+    ##32*32*16   
+    
+    
+    X = identity_block(X, 3, [16, 16, 16], stage=2, block='a')
+    ##32*32*16
+    
+    ##
+    X = ZeroPadding2D((1, 1))(X)
+    # CONV -> BN -> RELU Block applied to X
+    X = Conv2D(32, (3, 3), strides = (1, 1), name = 'conv2')(X)
+    X = BatchNormalization(axis = 3, name = 'bn2')(X)
+    X = Activation('relu')(X)
+    ##32*32*32 
+
+    X = ZeroPadding2D((2, 2))(X)
+    # CONV -> BN -> RELU Block applied to X
+    X = Conv2D(32, (3, 3), strides = (1, 1), name = 'conv3')(X)
+    X = BatchNormalization(axis = 3, name = 'bn3')(X)
+    X = Activation('relu')(X)
+        # MAXPOOL
+    X = MaxPooling2D((2, 2), name='max_pool3')(X) 
+    ##16*16*32 
+    
+    X = identity_block(X, 3, [32, 32, 32], stage=4, block='a')
+    ##16*16*32
+    
+    X = ZeroPadding2D((1, 1))(X)
+    # CONV -> BN -> RELU Block applied to X
+    X = Conv2D(64, (3, 3), strides = (1, 1), name = 'conv4')(X)
+    X = BatchNormalization(axis = 3, name = 'bn4')(X)
+    X = Activation('relu')(X)
+
+    # MAXPOOL
+    X = MaxPooling2D((2, 2), name='max_pool2')(X)
+    ##8*8*64    
+        
+    
+    print(X.shape)
+    # FLATTEN X (means convert it to a vector) + FULLYCONNECTED
+    X = Flatten()(X)
+    X = Dense(1, activation='sigmoid', name='fc')(X)
+
+    # Create model. This creates your Keras model instance, you'll use this instance to train/test the model.
+    model = Model(inputs = X_input, outputs = X, name='CATDOG')
+   
+    return model
+
+
+
+root="C:/Users/amine/Desktop/catdog/train/"
+X_train, X_test, Y_train, Y_test=gather_date(root)
+
+
+print ("number of training examples = " + str(X_train.shape[0]))
+print ("number of test examples = " + str(X_test.shape[0]))
+print ("X_train shape: " + str(X_train.shape))
+print ("Y_train shape: " + str(Y_train.shape))
+print ("X_test shape: " + str(X_test.shape))
+print ("Y_test shape: " + str(Y_test.shape))
+
+print("************Model is defined***************")
+CATDOG = CATDOG(shape)
+print("************Model is fitting***************")
+CATDOG.compile(optimizer = "adam",loss = "binary_crossentropy",metrics = ["accuracy"])
+CATDOG.fit(x = X_train,y = Y_train,epochs =10 ,batch_size = 32 )
+print("************Model is testing***************")
+preds = CATDOG.evaluate(x = X_test,y = Y_test)
+print ("Loss = " + str(preds[0]))
+print ("Test Accuracy after 10 epochs= " + str(preds[1]))
+
+CATDOG.fit(x = X_train,y = Y_train,epochs =10 ,batch_size = 32 )
+print("************Model is testing***************")
+preds = CATDOG.evaluate(x = X_test,y = Y_test)
+print ("Loss = " + str(preds[0]))
+print ("Test Accuracy after 20 epochs= " + str(preds[1]))
+
+##to save the model as pickle
+import pickle
+with open("CNN2.pickle", "wb") as FH:
+    pickle.dump(CATDOG,FH)
+
+
